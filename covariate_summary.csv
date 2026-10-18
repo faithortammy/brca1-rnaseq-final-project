@@ -1,0 +1,10 @@
+Covariate,Level,n,Percent
+PAM50 subtype,Basal,197,16.003249390739235
+PAM50 subtype,HER2-enriched,82,6.661251015434606
+PAM50 subtype,Luminal A,571,46.38505280259951
+PAM50 subtype,Luminal B,209,16.978066612510155
+PAM50 subtype,Normal-like,40,3.249390739236393
+PAM50 subtype,Not classified,132,10.722989439480097
+Sample type,Primary Tumor,1111,90.25182778229082
+Sample type,Solid Tissue Normal,113,9.179528838342812
+Sample type,Metastatic,7,0.5686433793663688

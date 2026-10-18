@@ -1,0 +1,1 @@
+R~4.5.2, tidyverse~2.0.0, ComplexHeatmap~2.26.1, circlize~0.4.18, knitr~1.51, rmarkdown~2.30, scales~1.4.0

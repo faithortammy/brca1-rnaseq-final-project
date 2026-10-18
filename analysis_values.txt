@@ -1,0 +1,7 @@
+spearman_rho=0.318
+spearman_p=2.17325e-30
+median_Basal=1050
+median_HER2-enriched=967
+median_Luminal A=864
+median_Luminal B=2019
+median_Normal-like=579

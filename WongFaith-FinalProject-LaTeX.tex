@@ -1,0 +1,221 @@
+\documentclass[11pt]{article}
+\usepackage[letterpaper,margin=0.82in]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{microtype}
+\usepackage{setspace}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+
+\definecolor{navy}{HTML}{17365D}
+\definecolor{lightblue}{HTML}{EAF2F8}
+\captionsetup{font=small,labelfont=bf}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.55em}
+\setstretch{1.05}
+\pagestyle{fancy}
+\setlength{\headheight}{14pt}
+\fancyhf{}
+\lhead{BRCA1 RNA Sequencing Analysis}
+\rhead{Faith Wong}
+\cfoot{\thepage}
+\renewcommand{\headrulewidth}{0.3pt}
+
+\title{\textbf{BRCA1 RNA Sequencing Patterns in TCGA Breast Cancer Samples}}
+\author{Faith Wong\\Foundations of Data Science}
+\date{October 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This report characterizes BRCA1 RNA-sequencing counts across 1,231 samples from The Cancer Genome Atlas Breast Invasive Carcinoma cohort. BRCA1 counts were strongly right-skewed and differed descriptively across PAM50 molecular subtypes. BRCA1 and ERBB2 showed a modest positive rank association, while a ten-gene heatmap recovered recognizable subtype-associated expression patterns. Updated figures incorporate PAM50 subtype and sample-type annotations, and an empirical cumulative distribution plot provides an additional view of the complete BRCA1 count distributions.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+\section{Introduction}
+
+The Cancer Genome Atlas Breast Invasive Carcinoma project (TCGA-BRCA) provides molecular and clinical data from breast-cancer patients, including bulk RNA-sequencing counts and sample-level metadata. The dataset analysed here contains 1,231 primary-tumour, metastatic, and solid-tissue-normal samples. TCGA was jointly supported by the National Cancer Institute and National Human Genome Research Institute and generated integrated genomic profiles across 33 cancer types \cite{nci_tcga,tcga2012}.
+
+BRCA1 was selected because it encodes a tumour-suppressor protein central to homologous-recombination DNA repair and maintenance of genomic stability. Loss of normal BRCA1 function can increase genomic instability and inherited susceptibility to breast and ovarian cancers \cite{roy2012}. ERBB2 was used as the comparison gene because amplification or overexpression of this receptor is clinically important in HER2-positive breast cancer. PAM50 molecular subtype was the primary categorical covariate, and sample type was included as a second covariate \cite{parker2009}.
+
+The objectives were to summarize BRCA1 counts and both categorical covariates; update the histogram, scatter plot, box plot, and heatmap with clearer annotations; and add an empirical cumulative distribution function (ECDF) plot that does not depend on histogram bins or density-smoothing choices.
+
+\section{Methods}
+
+\subsection{Data preparation}
+
+The count matrix and metadata were imported from comma-separated files. Version suffixes were removed from Ensembl identifiers before the rows corresponding to BRCA1 (ENSG00000012048), ERBB2 (ENSG00000141736), and eight additional heatmap genes were selected. Counts were converted from wide to long form and linked to the metadata by sample barcode. Automated checks confirmed that all count-matrix sample identifiers occurred in the metadata and that each selected gene was uniquely identified.
+
+PAM50 values were relabelled as Basal, HER2-enriched, Luminal A, Luminal B, and Normal-like. Samples without a PAM50 value were retained as ``Not classified'' in the descriptive table and scatter plot but excluded from subtype-specific box plots, ECDF curves, and heatmap splits.
+
+\subsection{Software and statistical methods}
+
+The analysis used R 4.5.2, tidyverse 2.0.0, ComplexHeatmap 2.26.1, circlize 0.4.18, knitr 1.51, rmarkdown 2.30, and scales 1.4.0. The \texttt{tidyverse} collection imported, reshaped, joined, summarized, and plotted the data; \texttt{ComplexHeatmap} created the annotated heatmap; \texttt{circlize} defined its diverging colour scale; \texttt{scales} formatted axes; and \texttt{knitr} with \texttt{rmarkdown} generated the reproducible code report \cite{wickham2016,gu2016}. These versions were recorded programmatically using \texttt{R.version} and \texttt{packageVersion()} when the R Markdown analysis was knitted.
+
+BRCA1 counts were summarized using the number of nonmissing observations, mean, median, sample standard deviation, minimum, and maximum. Categorical covariates were summarized with counts and percentages using all 1,231 samples as the denominator. Logarithmic axes and $\log_2(\mathrm{count}+1)$ transformations reduced visual compression caused by right-skewed counts. Spearman's rank correlation quantified the monotonic association between BRCA1 and ERBB2 without requiring normally distributed counts.
+
+For the heatmap, counts were transformed as $\log_2(\mathrm{count}+1)$ and standardized separately for each gene using row Z-scores. The colour scale was capped visually at $-2$ and $2$ standard deviations. This displays relative expression within each gene and does not compare absolute expression magnitudes between genes.
+
+\section{Results}
+
+\subsection{Summary statistics}
+
+BRCA1 had a mean RNA-sequencing count of 1,304.21 and a median of 919 across 1,231 samples (Table~\ref{tab:brca1}). The standard deviation was 1,137.35, and counts ranged from 21 to 8,050. The mean exceeded the median, consistent with a right-skewed distribution.
+
+\begin{table}[H]
+\centering
+\caption{Summary statistics for BRCA1 RNA-sequencing counts.}
+\label{tab:brca1}
+\small
+\begin{tabular}{lrrrrrr}
+\toprule
+Gene & Samples & Mean & Median & SD & Minimum & Maximum \\
+\midrule
+BRCA1 & 1,231 & 1,304.21 & 919.00 & 1,137.35 & 21 & 8,050 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Luminal A was the most common PAM50 subtype (571 samples; 46.4\%), while 132 samples (10.7\%) were not classified (Table~\ref{tab:covariates}). Primary tumours represented 90.3\% of the dataset. The seven metastatic samples constituted only 0.6\% of the cohort, so visual comparisons involving this group require caution.
+
+\begin{table}[H]
+\centering
+\caption{Summary statistics for PAM50 subtype and sample type. Percentages use all 1,231 samples as the denominator.}
+\label{tab:covariates}
+\small
+\begin{tabularx}{0.78\textwidth}{>{\bfseries}lXrr}
+\toprule
+Covariate & Level & $n$ & Percent \\
+\midrule
+PAM50 subtype & Basal & 197 & 16.0\% \\
+ & HER2-enriched & 82 & 6.7\% \\
+ & Luminal A & 571 & 46.4\% \\
+ & Luminal B & 209 & 17.0\% \\
+ & Normal-like & 40 & 3.2\% \\
+ & Not classified & 132 & 10.7\% \\
+\addlinespace
+Sample type & Primary Tumor & 1,111 & 90.3\% \\
+ & Solid Tissue Normal & 113 & 9.2\% \\
+ & Metastatic & 7 & 0.6\% \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Updated histogram}
+
+Figure~\ref{fig:histogram} stratifies the BRCA1 histogram by sample type and marks each group median. The primary-tumour distribution was strongly right-skewed, with most observations at lower-to-moderate values and a long upper tail. The separate panels prevent the much larger primary-tumour group from visually obscuring the normal and metastatic samples.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{results/figures/histogram_brca1_by_sample_type.pdf}
+\caption{Distribution of BRCA1 counts stratified by sample type. Dashed lines indicate group medians.}
+\label{fig:histogram}
+\end{figure}
+
+\subsection{Updated scatter plot}
+
+BRCA1 and ERBB2 counts showed a statistically detectable but modest positive rank association (Spearman $\rho=0.32$; Figure~\ref{fig:scatter}). ERBB2 counts varied substantially among samples with similar BRCA1 counts. Colouring by PAM50 subtype reveals that many samples with extremely high ERBB2 counts were HER2-enriched, a pattern not visible when all observations were plotted in one colour.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.88\textwidth]{results/figures/scatter_brca1_erbb2_by_subtype.pdf}
+\caption{BRCA1 and ERBB2 RNA-sequencing counts on logarithmic axes, coloured by PAM50 subtype.}
+\label{fig:scatter}
+\end{figure}
+
+\subsection{Updated box plot}
+
+Luminal B had the highest median BRCA1 count (2,019), while Normal-like had the lowest median (579; Figure~\ref{fig:boxplot}). Basal, HER2-enriched, and Luminal A had intermediate medians. Wide ranges and substantial overlap remained across all groups, showing that PAM50 subtype is associated with, but does not fully explain, sample-level variation in BRCA1 counts. Jittered points and sample-size labels make the distribution and unequal group sizes explicit.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{results/figures/boxplot_brca1_by_subtype.pdf}
+\caption{BRCA1 count distributions across PAM50 molecular subtypes. Boxes show medians and interquartile ranges; points show individual samples.}
+\label{fig:boxplot}
+\end{figure}
+
+\subsection{Updated heatmap}
+
+The ten-gene heatmap shows recognizable subtype-associated patterns (Figure~\ref{fig:heatmap}). Basal samples generally had lower relative expression of PGR, ESR1, GATA3, and FOXA1, with higher relative MKI67 and EGFR in many samples. HER2-enriched samples contained a prominent high-ERBB2 pattern. Luminal A and Luminal B generally showed higher relative expression of hormone-receptor-related genes. The additional sample-type annotation bar provides biological context beyond the PAM50 classification.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{results/figures/heatmap_ten_genes_two_annotations.pdf}
+\caption{Row-standardized expression of ten breast-cancer-relevant genes. Annotation bars identify PAM50 subtype and sample type. Red indicates above-average and blue below-average expression for a given gene.}
+\label{fig:heatmap}
+\end{figure}
+
+\subsection{Additional plot type}
+
+The ECDF in Figure~\ref{fig:ecdf} uses every observation and does not depend on histogram bin width or density smoothing. At a selected x-axis value, the curve gives the proportion of samples with BRCA1 counts at or below that value. The Luminal B curve is shifted to the right, confirming generally higher BRCA1 counts, while the Normal-like curve is shifted to the left.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.88\textwidth]{results/figures/ecdf_brca1_by_subtype.pdf}
+\caption{Empirical cumulative distributions of BRCA1 counts across PAM50 subtypes.}
+\label{fig:ecdf}
+\end{figure}
+
+\section{Discussion and limitations}
+
+The analysis identified substantial heterogeneity in BRCA1 RNA-sequencing counts across TCGA-BRCA samples. The combination of stratified histograms, subtype-coloured scatter points, individual observations on the box plot, and dual heatmap annotations adds categorical context that was absent or less explicit in the check-in figures. The ECDF confirms distributional shifts without introducing additional smoothing assumptions.
+
+The analysis is descriptive and should not be interpreted as a formal differential-expression study. Raw counts can reflect sequencing depth, tissue composition, and other technical and biological factors. Bulk RNA sequencing averages expression across cells, row Z-scores are relative within genes, and samples from the same patient may not be statistically independent. Group sizes were highly unequal, particularly for metastatic samples. Formal inference would require count normalization, an appropriate statistical model, and adjustment for relevant covariates.
+
+\section{Code and data availability}
+
+All analysis code is contained in the accompanying R Markdown file. The public Git repository link should be supplied with the Canvas submission after the repository has been created and the code pushed. The large raw TCGA-derived count matrix should only be committed if permitted by the course instructions and Git hosting limits; otherwise the repository should include documented download and file-placement instructions.
+
+\section{References}
+
+\begin{thebibliography}{9}
+
+\bibitem{nci_tcga}
+National Cancer Institute.
+\textit{The Cancer Genome Atlas Program}.
+\url{https://www.cancer.gov/ccg/research/genome-sequencing/tcga}.
+Accessed October 2026.
+
+\bibitem{tcga2012}
+The Cancer Genome Atlas Network.
+Comprehensive molecular portraits of human breast tumours.
+\textit{Nature}. 2012;490:61--70.
+\url{https://doi.org/10.1038/nature11412}.
+
+\bibitem{roy2012}
+Roy R, Chun J, Powell SN.
+BRCA1 and BRCA2: different roles in a common pathway of genome protection.
+\textit{Nature Reviews Cancer}. 2012;12:68--78.
+\url{https://doi.org/10.1038/nrc3181}.
+
+\bibitem{parker2009}
+Parker JS, Mullins M, Cheang MCU, et al.
+Supervised risk predictor of breast cancer based on intrinsic subtypes.
+\textit{Journal of Clinical Oncology}. 2009;27(8):1160--1167.
+\url{https://doi.org/10.1200/JCO.2008.18.1370}.
+
+\bibitem{wickham2016}
+Wickham H.
+\textit{ggplot2: Elegant Graphics for Data Analysis}.
+Springer-Verlag New York; 2016.
+\url{https://ggplot2.tidyverse.org}.
+
+\bibitem{gu2016}
+Gu Z, Eils R, Schlesner M.
+Complex heatmaps reveal patterns and correlations in multidimensional genomic data.
+\textit{Bioinformatics}. 2016;32(18):2847--2849.
+\url{https://doi.org/10.1093/bioinformatics/btw313}.
+
+\end{thebibliography}
+
+\end{document}

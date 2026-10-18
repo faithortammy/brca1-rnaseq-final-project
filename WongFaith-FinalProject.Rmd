@@ -1,0 +1,507 @@
+---
+title: "BRCA1 RNA Sequencing Patterns in TCGA Breast Cancer Samples"
+author: "Faith Wong"
+date: "October 2026"
+output:
+  pdf_document:
+    toc: true
+    number_sections: true
+    fig_caption: true
+geometry: margin=0.8in
+fontsize: 10pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center",
+  out.width = "95%"
+)
+
+dir.create("results/figures", recursive = TRUE, showWarnings = FALSE)
+dir.create("results/tables", recursive = TRUE, showWarnings = FALSE)
+```
+
+# Introduction
+
+This analysis uses bulk RNA-sequencing counts and associated clinical and sample metadata from 1,231 samples in The Cancer Genome Atlas Breast Invasive Carcinoma (TCGA-BRCA) cohort. The dataset contains primary tumour, metastatic, and solid-tissue-normal samples and includes clinical and molecular variables such as PAM50 intrinsic molecular subtype. TCGA was established by the National Cancer Institute and National Human Genome Research Institute to produce integrated genomic profiles across multiple cancer types [1,2].
+
+BRCA1 was selected as the primary gene because it encodes a tumour-suppressor protein involved in homologous-recombination DNA repair, cell-cycle control, and maintenance of genomic stability. Loss of BRCA1 function can promote genomic instability and is strongly associated with inherited susceptibility to breast and ovarian cancers [3]. ERBB2 was selected as the comparison gene because its amplification or overexpression defines an important clinically actionable breast-cancer subgroup. The analysis describes BRCA1 counts, compares BRCA1 and ERBB2 expression, evaluates BRCA1 variation across PAM50 subtypes, and examines ten breast-cancer-relevant genes using a heatmap with two categorical annotations.
+
+# Methods
+
+## Packages and reproducibility
+
+```{r packages}
+# Load packages used for data preparation and visualisation
+library(tidyverse)
+library(ComplexHeatmap)
+library(circlize)
+library(knitr)
+
+# Record software versions used for this analysis
+package_versions <- tibble(
+  Software = c(
+    "R",
+    "tidyverse",
+    "ComplexHeatmap",
+    "circlize",
+    "knitr",
+    "rmarkdown",
+    "scales"
+  ),
+  Version = c(
+    paste(R.version$major, R.version$minor, sep = "."),
+    as.character(packageVersion("tidyverse")),
+    as.character(packageVersion("ComplexHeatmap")),
+    as.character(packageVersion("circlize")),
+    as.character(packageVersion("knitr")),
+    as.character(packageVersion("rmarkdown")),
+    as.character(packageVersion("scales"))
+  )
+)
+
+kable(package_versions, caption = "Software versions used in the analysis.")
+
+# Save a LaTeX-ready version table for the separate report
+version_lines <- paste0(
+  package_versions$Software,
+  "~",
+  package_versions$Version,
+  collapse = ", "
+)
+writeLines(version_lines, "results/package_versions.txt")
+```
+
+The `tidyverse` collection was used to import, reshape, join, summarize, and plot the data. `ComplexHeatmap` generated the annotated heatmap, `circlize` defined its diverging colour function, `scales` formatted axis labels, and `knitr` and `rmarkdown` generated the reproducible PDF report. The table above records the versions available when this document was knitted.
+
+## Data preparation
+
+```{r data-preparation}
+# Import the RNA-sequencing count matrix and metadata
+counts_data <- read_csv("data/counts.csv", show_col_types = FALSE)
+meta_data <- read_csv("data/meta_data.csv", show_col_types = FALSE)
+
+# Name and standardize the gene-identifier column
+names(counts_data)[1] <- "Gene_ID"
+counts_data <- counts_data %>%
+  mutate(Ensembl_ID = str_remove(Gene_ID, "\\..*$"))
+
+# Extract sample identifiers and verify that they occur in the metadata
+sample_ids <- names(counts_data)[
+  names(counts_data) != "Gene_ID" & names(counts_data) != "Ensembl_ID"
+]
+stopifnot(all(sample_ids %in% meta_data$barcode))
+
+# Define consistent labels and colours for categorical variables
+subtype_levels <- c("Basal", "HER2-enriched", "Luminal A", "Luminal B", "Normal-like")
+subtype_colors <- c(
+  "Basal" = "#D55E00",
+  "HER2-enriched" = "#CC79A7",
+  "Luminal A" = "#009E73",
+  "Luminal B" = "#E69F00",
+  "Normal-like" = "#56B4E9",
+  "Not classified" = "#999999"
+)
+sample_type_colors <- c(
+  "Primary Tumor" = "#4C78A8",
+  "Solid Tissue Normal" = "#59A14F",
+  "Metastatic" = "#E15759"
+)
+
+# Function to extract one gene and convert its counts from wide to long format
+extract_gene <- function(gene_id, count_name) {
+  gene_row <- counts_data %>% filter(Ensembl_ID == gene_id)
+  if (nrow(gene_row) != 1) {
+    stop(paste(gene_id, "was not found uniquely in the count matrix."))
+  }
+  gene_row %>%
+    select(all_of(sample_ids)) %>%
+    pivot_longer(
+      cols = everything(),
+      names_to = "barcode",
+      values_to = count_name
+    )
+}
+
+# Extract BRCA1 and ERBB2 counts and attach the two selected covariates
+brca1_data <- extract_gene("ENSG00000012048", "BRCA1_Count")
+erbb2_data <- extract_gene("ENSG00000141736", "ERBB2_Count")
+
+analysis_data <- brca1_data %>%
+  inner_join(erbb2_data, by = "barcode") %>%
+  left_join(
+    meta_data %>%
+      select(barcode, PAM50_raw = paper_BRCA_Subtype_PAM50, Sample_Type = sample_type),
+    by = "barcode"
+  ) %>%
+  mutate(
+    PAM50_Subtype = recode(
+      PAM50_raw,
+      "Basal" = "Basal",
+      "Her2" = "HER2-enriched",
+      "LumA" = "Luminal A",
+      "LumB" = "Luminal B",
+      "Normal" = "Normal-like",
+      .default = "Not classified",
+      .missing = "Not classified"
+    ),
+    PAM50_Subtype = factor(
+      PAM50_Subtype,
+      levels = c(subtype_levels, "Not classified")
+    ),
+    Sample_Type = factor(
+      Sample_Type,
+      levels = c("Primary Tumor", "Solid Tissue Normal", "Metastatic")
+    )
+  )
+
+stopifnot(nrow(analysis_data) == length(sample_ids))
+```
+
+Version suffixes were removed from Ensembl identifiers before the BRCA1 and ERBB2 rows were selected. The count matrix was converted from wide to long form, and sample barcodes were used to join gene counts to PAM50 subtype and sample type. Checks stop the analysis if either gene is not uniquely identified or if sample identifiers cannot be matched.
+
+## Statistical approach
+
+BRCA1 was summarized using the number of nonmissing observations, mean, median, sample standard deviation, minimum, and maximum. PAM50 subtype and sample type were summarized using counts and percentages of all 1,231 samples. Raw counts were displayed on logarithmic scales or transformed as $\log_2(\mathrm{count}+1)$ when needed to reduce compression caused by right-skewed count distributions. Spearman's rank correlation quantified the monotonic association between BRCA1 and ERBB2 without assuming a linear relationship or normally distributed counts. Analyses are descriptive and do not establish causal or differential-expression effects.
+
+# Results
+
+## BRCA1 and covariate summary statistics
+
+```{r summary-tables}
+# Summarize BRCA1 counts
+brca1_summary <- analysis_data %>%
+  summarise(
+    Gene = "BRCA1",
+    `Number of samples` = sum(!is.na(BRCA1_Count)),
+    Mean = mean(BRCA1_Count, na.rm = TRUE),
+    Median = median(BRCA1_Count, na.rm = TRUE),
+    `Standard deviation` = sd(BRCA1_Count, na.rm = TRUE),
+    Minimum = min(BRCA1_Count, na.rm = TRUE),
+    Maximum = max(BRCA1_Count, na.rm = TRUE)
+  )
+
+kable(
+  brca1_summary,
+  digits = 2,
+  format.args = list(big.mark = ","),
+  caption = "Summary statistics for BRCA1 RNA-sequencing counts."
+)
+
+# Summarize PAM50 subtype and sample type
+covariate_summary <- bind_rows(
+  analysis_data %>%
+    count(Level = PAM50_Subtype, name = "n") %>%
+    mutate(Covariate = "PAM50 subtype"),
+  analysis_data %>%
+    count(Level = Sample_Type, name = "n") %>%
+    mutate(Covariate = "Sample type")
+) %>%
+  mutate(Percent = 100 * n / nrow(analysis_data)) %>%
+  select(Covariate, Level, n, Percent)
+
+kable(
+  covariate_summary,
+  digits = c(0, 0, 0, 1),
+  caption = "Distribution of the two selected categorical covariates. Percentages use all 1,231 samples as the denominator."
+)
+
+write_csv(brca1_summary, "results/tables/brca1_summary.csv")
+write_csv(covariate_summary, "results/tables/covariate_summary.csv")
+```
+
+BRCA1 had a mean count of 1,304.21 and a median of 919 across 1,231 samples. The standard deviation was 1,137.35, and counts ranged from 21 to 8,050. The mean exceeded the median, indicating a right-skewed distribution. Luminal A was the largest PAM50 group (571 samples; 46.4%), while 132 samples (10.7%) lacked a PAM50 classification. Most samples were primary tumours (1,111; 90.3%), followed by solid-tissue-normal samples (113; 9.2%) and metastatic samples (7; 0.6%).
+
+## Updated histogram
+
+```{r histogram, fig.width=10, fig.height=5.5, fig.cap="Distribution of BRCA1 counts stratified by sample type. Dashed lines show the median within each group."}
+# Calculate group medians for annotations
+histogram_medians <- analysis_data %>%
+  group_by(Sample_Type) %>%
+  summarise(
+    Median = median(BRCA1_Count, na.rm = TRUE),
+    n = sum(!is.na(BRCA1_Count)),
+    .groups = "drop"
+  )
+
+brca1_histogram <- ggplot(
+  analysis_data,
+  aes(x = log10(BRCA1_Count + 1), fill = Sample_Type)
+) +
+  geom_histogram(bins = 30, color = "white", alpha = 0.85, na.rm = TRUE) +
+  geom_vline(
+    data = histogram_medians,
+    aes(xintercept = log10(Median + 1)),
+    linetype = "dashed",
+    linewidth = 0.8,
+    inherit.aes = FALSE
+  ) +
+  facet_wrap(~Sample_Type, scales = "free_y") +
+  scale_fill_manual(values = sample_type_colors, drop = FALSE) +
+  labs(
+    title = "Distribution of BRCA1 RNA-sequencing Counts by Sample Type",
+    x = "log10(BRCA1 count + 1)",
+    y = "Number of samples"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    legend.position = "none"
+  )
+
+brca1_histogram
+ggsave(
+  "results/figures/histogram_brca1_by_sample_type.pdf",
+  brca1_histogram,
+  width = 10,
+  height = 5.5
+)
+```
+
+The updated histogram retains the distributional view from the check-in but stratifies samples by the second covariate. BRCA1 counts remained right-skewed, particularly among primary tumours. The metastatic panel contains only seven samples and should therefore be interpreted cautiously.
+
+## Updated scatter plot
+
+```{r scatter-plot, fig.width=9, fig.height=6.5, fig.cap="Association between BRCA1 and ERBB2 counts, coloured by PAM50 subtype."}
+# Calculate Spearman's rank correlation
+gene_correlation <- cor.test(
+  analysis_data$BRCA1_Count,
+  analysis_data$ERBB2_Count,
+  method = "spearman",
+  exact = FALSE
+)
+
+gene_scatter_plot <- ggplot(
+  analysis_data,
+  aes(
+    x = BRCA1_Count,
+    y = ERBB2_Count,
+    color = PAM50_Subtype
+  )
+) +
+  geom_point(alpha = 0.55, size = 1.7, na.rm = TRUE) +
+  scale_x_log10(labels = scales::comma) +
+  scale_y_log10(labels = scales::comma) +
+  scale_color_manual(values = subtype_colors, drop = FALSE) +
+  annotate(
+    "label",
+    x = -Inf,
+    y = Inf,
+    hjust = -0.1,
+    vjust = 1.2,
+    label = paste0("Spearman rho = ", round(unname(gene_correlation$estimate), 2)),
+    size = 3.5
+  ) +
+  labs(
+    title = "BRCA1 and ERBB2 Counts by PAM50 Subtype",
+    x = "BRCA1 RNA-sequencing count (log scale)",
+    y = "ERBB2 RNA-sequencing count (log scale)",
+    color = "PAM50 subtype"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5))
+
+gene_scatter_plot
+ggsave(
+  "results/figures/scatter_brca1_erbb2_by_subtype.pdf",
+  gene_scatter_plot,
+  width = 9,
+  height = 6.5
+)
+```
+
+BRCA1 and ERBB2 showed a positive but modest monotonic association (Spearman $\rho$ approximately 0.32). The subtype annotation reveals that the samples with the highest ERBB2 counts are disproportionately HER2-enriched, a pattern that was obscured when all points had the same colour in the check-in plot. Considerable vertical dispersion remained at similar BRCA1 levels, so BRCA1 alone does not closely predict ERBB2 counts.
+
+## Updated box plot
+
+```{r box-plot, fig.width=9, fig.height=6, fig.cap="BRCA1 count distributions across PAM50 subtypes. Points show individual samples and boxes show medians and interquartile ranges."}
+boxplot_data <- analysis_data %>%
+  filter(PAM50_Subtype != "Not classified")
+
+subtype_sample_counts <- boxplot_data %>%
+  count(PAM50_Subtype)
+
+brca1_boxplot <- ggplot(
+  boxplot_data,
+  aes(x = PAM50_Subtype, y = BRCA1_Count, fill = PAM50_Subtype)
+) +
+  geom_boxplot(width = 0.62, outlier.shape = NA, alpha = 0.8, na.rm = TRUE) +
+  geom_jitter(width = 0.18, alpha = 0.16, size = 0.7, color = "#333333", na.rm = TRUE) +
+  geom_text(
+    data = subtype_sample_counts,
+    aes(x = PAM50_Subtype, y = Inf, label = paste0("n=", n)),
+    vjust = 1.4,
+    size = 3,
+    inherit.aes = FALSE
+  ) +
+  scale_fill_manual(values = subtype_colors) +
+  scale_y_log10(labels = scales::comma, expand = expansion(mult = c(0.05, 0.14))) +
+  labs(
+    title = "BRCA1 Counts Across PAM50 Molecular Subtypes",
+    x = "PAM50 molecular subtype",
+    y = "BRCA1 RNA-sequencing count (log scale)"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    axis.text.x = element_text(angle = 18, hjust = 1),
+    legend.position = "none"
+  )
+
+brca1_boxplot
+ggsave(
+  "results/figures/boxplot_brca1_by_subtype.pdf",
+  brca1_boxplot,
+  width = 9,
+  height = 6
+)
+```
+
+Luminal B had the highest median BRCA1 count (2,019), whereas Normal-like had the lowest median (579). The substantial overlap and broad within-subtype ranges show that PAM50 subtype is associated with, but does not fully explain, variation in BRCA1 counts.
+
+## Updated heatmap with two annotation bars
+
+```{r heatmap, fig.width=11, fig.height=7.2, fig.cap="Row-standardized expression of ten breast-cancer-relevant genes. Top annotation bars identify PAM50 subtype and sample type."}
+# Define the selected genes and Ensembl identifiers
+heatmap_gene_key <- tribble(
+  ~Gene_Symbol, ~Ensembl_ID,
+  "BRCA1", "ENSG00000012048",
+  "BRCA2", "ENSG00000139618",
+  "ERBB2", "ENSG00000141736",
+  "ESR1",  "ENSG00000091831",
+  "PGR",   "ENSG00000082175",
+  "TP53",  "ENSG00000141510",
+  "MKI67", "ENSG00000148773",
+  "EGFR",  "ENSG00000146648",
+  "GATA3", "ENSG00000107485",
+  "FOXA1", "ENSG00000129514"
+)
+
+# Select and order the ten genes
+heatmap_counts <- counts_data %>%
+  filter(Ensembl_ID %in% heatmap_gene_key$Ensembl_ID) %>%
+  select(Ensembl_ID, all_of(sample_ids)) %>%
+  arrange(match(Ensembl_ID, heatmap_gene_key$Ensembl_ID))
+
+stopifnot(nrow(heatmap_counts) == 10)
+
+count_matrix <- as.matrix(heatmap_counts %>% select(all_of(sample_ids)))
+rownames(count_matrix) <- heatmap_gene_key$Gene_Symbol[
+  match(heatmap_counts$Ensembl_ID, heatmap_gene_key$Ensembl_ID)
+]
+
+# Prepare two aligned categorical annotations
+heatmap_metadata <- analysis_data %>%
+  filter(PAM50_Subtype != "Not classified") %>%
+  select(barcode, PAM50_Subtype, Sample_Type) %>%
+  arrange(PAM50_Subtype, Sample_Type)
+
+count_matrix <- count_matrix[, heatmap_metadata$barcode, drop = FALSE]
+scaled_count_matrix <- t(scale(t(log2(count_matrix + 1))))
+
+heatmap_annotation <- HeatmapAnnotation(
+  `PAM50 subtype` = heatmap_metadata$PAM50_Subtype,
+  `Sample type` = heatmap_metadata$Sample_Type,
+  col = list(
+    `PAM50 subtype` = subtype_colors[subtype_levels],
+    `Sample type` = sample_type_colors
+  ),
+  annotation_name_side = "left"
+)
+
+heatmap_colors <- colorRamp2(
+  c(-2, 0, 2),
+  c("#2166AC", "white", "#B2182B")
+)
+
+gene_heatmap <- Heatmap(
+  scaled_count_matrix,
+  name = "Expression\nZ-score",
+  col = heatmap_colors,
+  top_annotation = heatmap_annotation,
+  column_split = heatmap_metadata$PAM50_Subtype,
+  cluster_rows = TRUE,
+  cluster_columns = TRUE,
+  cluster_column_slices = FALSE,
+  show_column_names = FALSE,
+  show_row_names = TRUE,
+  row_names_side = "left",
+  row_title = "Selected genes",
+  column_title = "Samples grouped by PAM50 subtype",
+  # Use vector rendering because rasterization can fail when
+  # ComplexHeatmap cannot reopen its temporary PNG file during knitting
+  use_raster = FALSE
+)
+
+draw(
+  gene_heatmap,
+  heatmap_legend_side = "right",
+  annotation_legend_side = "right"
+)
+
+# Save a separate vector-PDF copy for the LaTeX report
+pdf("results/figures/heatmap_ten_genes_two_annotations.pdf", width = 11, height = 7.2)
+draw(
+  gene_heatmap,
+  heatmap_legend_side = "right",
+  annotation_legend_side = "right"
+)
+dev.off()
+```
+
+The heatmap shows lower relative ESR1, PGR, GATA3, and FOXA1 expression in many Basal samples, while the luminal groups generally show higher relative expression of these hormone-receptor-related genes. HER2-enriched samples contain a prominent high-ERBB2 pattern. The added sample-type bar provides context for distinguishing primary tumour, metastatic, and solid-tissue-normal samples, while the column split makes subtype-level structure easier to inspect.
+
+## Additional plot type: empirical cumulative distribution
+
+```{r ecdf-plot, fig.width=9, fig.height=6, fig.cap="Empirical cumulative distributions of BRCA1 counts across PAM50 subtypes."}
+brca1_ecdf <- ggplot(
+  boxplot_data,
+  aes(x = BRCA1_Count, color = PAM50_Subtype)
+) +
+  stat_ecdf(linewidth = 1, na.rm = TRUE) +
+  scale_x_log10(labels = scales::comma) +
+  scale_color_manual(values = subtype_colors[subtype_levels]) +
+  labs(
+    title = "Cumulative Distribution of BRCA1 Counts by PAM50 Subtype",
+    x = "BRCA1 RNA-sequencing count (log scale)",
+    y = "Cumulative proportion of samples",
+    color = "PAM50 subtype"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5))
+
+brca1_ecdf
+ggsave(
+  "results/figures/ecdf_brca1_by_subtype.pdf",
+  brca1_ecdf,
+  width = 9,
+  height = 6
+)
+```
+
+The empirical cumulative distribution function is the additional plot type. At any x-axis value, the curve gives the proportion of samples with BRCA1 counts at or below that value. The right-shifted Luminal B curve confirms generally higher BRCA1 counts, whereas the left-shifted Normal-like curve indicates generally lower counts. Because the ECDF uses every observation and does not depend on bin width or density smoothing, it complements the histogram and box plot.
+
+# Discussion and limitations
+
+The analysis identified substantial heterogeneity in BRCA1 RNA-sequencing counts across TCGA-BRCA samples. BRCA1 counts were right-skewed, varied across PAM50 groups, and showed a modest positive association with ERBB2. The heatmap demonstrated biologically coherent subtype-associated patterns, including elevated ERBB2 in HER2-enriched samples and higher relative hormone-receptor-related gene expression in luminal samples.
+
+These results are descriptive. Raw bulk RNA-sequencing counts are affected by sequencing depth, tissue composition, and other technical and biological factors. Row Z-scores in the heatmap show relative expression within each gene and should not be used to compare absolute expression between different genes. Sample groups are also unbalanced, especially the metastatic category, and observations from the same patient may not be statistically independent. A formal differential-expression analysis would require normalization, an appropriate count model, and adjustment for relevant covariates.
+
+# References
+
+1. National Cancer Institute. *The Cancer Genome Atlas Program*. https://www.cancer.gov/ccg/research/genome-sequencing/tcga. Accessed October 2026.
+2. The Cancer Genome Atlas Network. Comprehensive molecular portraits of human breast tumours. *Nature*. 2012;490:61--70. doi:10.1038/nature11412.
+3. Roy R, Chun J, Powell SN. BRCA1 and BRCA2: different roles in a common pathway of genome protection. *Nature Reviews Cancer*. 2012;12:68--78. doi:10.1038/nrc3181.
+4. Parker JS, Mullins M, Cheang MCU, et al. Supervised risk predictor of breast cancer based on intrinsic subtypes. *Journal of Clinical Oncology*. 2009;27(8):1160--1167. doi:10.1200/JCO.2008.18.1370.
+5. Wickham H. *ggplot2: Elegant Graphics for Data Analysis*. Springer-Verlag New York; 2016. https://ggplot2.tidyverse.org.
+6. Gu Z, Eils R, Schlesner M. Complex heatmaps reveal patterns and correlations in multidimensional genomic data. *Bioinformatics*. 2016;32(18):2847--2849. doi:10.1093/bioinformatics/btw313.
+
+# Reproducibility information
+
+```{r session-info}
+sessionInfo()
+```
+
